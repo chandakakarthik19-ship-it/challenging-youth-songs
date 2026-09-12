@@ -48,9 +48,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ uploaded: entries.length });
   } catch (error) {
     console.error("Unable to upload songs", error);
-    const message = error instanceof Error && error.message.includes("querySrv")
-      ? "MongoDB Atlas hostname could not be resolved. Update MONGODB_URI with the current Atlas connection string."
-      : "Upload failed. Check your MongoDB connection and try again.";
+    const detail = error instanceof Error ? error.message : String(error);
+    const message = detail.includes("querySrv")
+      ? "MongoDB Atlas hostname could not be resolved. Check both connection strings in Render."
+      : detail.includes("Authentication failed") || detail.includes("bad auth")
+        ? "MongoDB authentication failed. Check the username and password in Render."
+        : detail.includes("not authorized") || detail.includes("Unauthorized")
+          ? "MongoDB user is not authorized to write to the nadam database."
+          : detail.includes("timed out") || detail.includes("ETIMEDOUT")
+            ? "MongoDB connection timed out. Check Atlas network access and both connection strings."
+            : `Upload failed: ${detail.slice(0, 180)}`;
     return NextResponse.json({ error: message }, { status: 503 });
   }
 }
