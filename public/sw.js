@@ -12,7 +12,7 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type !== "CACHE_SONGS" || !Array.isArray(event.data.urls)) return;
-  event.waitUntil(cacheSongs(event.data.urls));
+  event.waitUntil(cacheSongs(event.data.urls, event.data.priorityUrl));
 });
 
 async function cachedAudio(request) {
@@ -25,15 +25,18 @@ async function cachedAudio(request) {
   return response;
 }
 
-async function cacheSongs(urls) {
+async function cacheSongs(urls, priorityUrl) {
   const cache = await caches.open(AUDIO_CACHE);
-  for (const url of urls) {
-    if (await cache.match(url)) continue;
-    try {
-      const response = await fetch(url);
-      if (response.ok && response.status === 200) await cache.put(url, response);
-    } catch {
-      // Keep preparing the remaining songs when one download fails.
-    }
+  const orderedUrls = priorityUrl ? [priorityUrl, ...urls.filter((url) => url !== priorityUrl)] : urls;
+  for (let index = 0; index < orderedUrls.length; index += 4) {
+    await Promise.all(orderedUrls.slice(index, index + 4).map(async (url) => {
+      if (await cache.match(url)) return;
+      try {
+        const response = await fetch(url);
+        if (response.ok && response.status === 200) await cache.put(url, response);
+      } catch {
+        // Keep preparing the remaining songs when one download fails.
+      }
+    }));
   }
 }

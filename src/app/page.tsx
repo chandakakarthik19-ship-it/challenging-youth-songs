@@ -17,7 +17,15 @@ const demoSongs: Song[] = [
 const defaultFolders = ["Devotional", "Bass Boost", "Procession", "Love Failure", "Youth", "Pavankalyan"];
 
 export default function Home() {
-  const [songs, setSongs] = useState(demoSongs);
+  const [songs, setSongs] = useState<Song[]>(() => {
+    if (typeof window === "undefined") return demoSongs;
+    try {
+      const savedSongs = window.localStorage.getItem("challenging-youth-songs");
+      return savedSongs ? JSON.parse(savedSongs) as Song[] : demoSongs;
+    } catch {
+      return demoSongs;
+    }
+  });
   const [activeSong, setActiveSong] = useState<Song | null>(demoSongs[0]);
   const [category, setCategory] = useState("All mixes");
   const [query, setQuery] = useState("");
@@ -35,19 +43,23 @@ export default function Home() {
   useEffect(() => {
     if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
     fetch("/songs.json").then((response) => response.ok ? response.json() : []).then((localSongs) => {
-      if (localSongs.length) setSongs(localSongs);
+      if (localSongs.length) {
+        setSongs(localSongs);
+        window.localStorage.setItem("challenging-youth-songs", JSON.stringify(localSongs));
+      }
     }).catch(() => undefined);
     fetch("/api/songs").then((response) => response.json()).then((data) => {
       if (data.songs?.length) {
         setSongs(data.songs);
+        window.localStorage.setItem("challenging-youth-songs", JSON.stringify(data.songs));
         if ("serviceWorker" in navigator) {
           navigator.serviceWorker.ready.then((registration) => {
-            registration.active?.postMessage({ type: "CACHE_SONGS", urls: data.songs.map((song: Song) => song.fileUrl).filter(Boolean) });
+            registration.active?.postMessage({ type: "CACHE_SONGS", urls: data.songs.map((song: Song) => song.fileUrl).filter(Boolean), priorityUrl: data.songs[0]?.fileUrl });
             setCacheState(`${data.songs.length} songs are being prepared for quick playback.`);
           }).catch(() => setCacheState("Songs will stream from the internet."));
         }
       }
-    }).catch(() => undefined);
+    }).catch(() => setCacheState("Ready to play from the saved library."));
   }, []);
 
   const folders = useMemo(() => [...new Set([...defaultFolders, ...songs.map((song) => song.category).filter(Boolean)])], [songs]);
