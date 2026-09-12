@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { Readable } from "node:stream";
 import { unzipSync } from "fflate";
-import { getAudioBucket, getDatabase } from "@/lib/mongodb";
+import { getStorageTargets } from "@/lib/mongodb";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,9 +16,8 @@ export async function POST(request: Request) {
     }
     const folder = String(formData.get("folder") ?? "").trim();
     if (!folder) return NextResponse.json({ error: "Please choose a folder for the song." }, { status: 400 });
-    const bucket = await getAudioBucket();
-    const database = await getDatabase();
-    if (!bucket || !database) return NextResponse.json({ error: "Add MONGODB_URI to .env.local first." }, { status: 503 });
+    const stores = await getStorageTargets();
+    if (!stores.length) return NextResponse.json({ error: "Add MONGODB_URI to .env.local first." }, { status: 503 });
 
     const entries = upload.name.toLowerCase().endsWith(".zip")
       ? Object.entries(unzipSync(new Uint8Array(await upload.arrayBuffer()))).filter(([name]) => supportedAudio.test(name))
@@ -29,9 +28,22 @@ export async function POST(request: Request) {
       const cleanName = entryName.split("/").pop() ?? entryName;
       const title = cleanName.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
       const file = Buffer.from(entryFile);
-      const uploadStream = bucket.openUploadStream(cleanName, { metadata: { originalName: cleanName, contentType: audioContentType(cleanName) } });
-      await new Promise<void>((resolve, reject) => Readable.from(file).pipe(uploadStream).on("finish", resolve).on("error", reject));
-      await database.collection("songs").insertOne({ title, artist: "Vinayaka Chavithi DJ", category: folder, audioId: uploadStream.id, createdAt: new Date() });
+      let stored = false;
+      let lastError: unknown;
+      for (const { bucket, database } of stores) {
+        let uploadStream: ReturnType<typeof bucket.openUploadStream> | undefined;
+        try {
+          uploadStream = bucket.openUploadStream(cleanName, { metadata: { originalName: cleanName, contentType: audioContentType(cleanName) } });
+          await new Promise<void>((resolve, reject) => Readable.from(file).pipe(uploadStream!).on("finish", resolve).on("error", reject));
+          await database.collection("songs").insertOne({ title, artist: "Vinayaka Chavithi DJ", category: folder, audioId: uploadStream.id, createdAt: new Date() });
+          stored = true;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (uploadStream) await bucket.delete(uploadStream.id).catch(() => undefined);
+        }
+      }
+      if (!stored) throw lastError;
     }
     return NextResponse.json({ uploaded: entries.length });
   } catch (error) {

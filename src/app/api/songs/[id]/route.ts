@@ -1,17 +1,21 @@
-import { ObjectId } from "mongodb";
+import { GridFSFile, ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
-import { getAudioBucket, getDatabase } from "@/lib/mongodb";
+import { getStorageTargets } from "@/lib/mongodb";
 
 export const runtime = "nodejs";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!ObjectId.isValid(id)) return NextResponse.json({ error: "Invalid song id" }, { status: 400 });
-  const bucket = await getAudioBucket();
-  if (!bucket) return NextResponse.json({ error: "MongoDB is not configured" }, { status: 503 });
-  const files = await bucket.find({ _id: new ObjectId(id) }).toArray();
-  if (!files[0]) return NextResponse.json({ error: "Song not found" }, { status: 404 });
-  const file = files[0];
+  const stores = await getStorageTargets();
+  if (!stores.length) return NextResponse.json({ error: "MongoDB is not configured" }, { status: 503 });
+  let bucket = stores[0].bucket;
+  let file: GridFSFile | null = null;
+  for (const store of stores) {
+    const matches = await store.bucket.find({ _id: new ObjectId(id) }).toArray();
+    if (matches[0]) { bucket = store.bucket; file = matches[0]; break; }
+  }
+  if (!file) return NextResponse.json({ error: "Song not found" }, { status: 404 });
   const range = _request.headers.get("range");
   const requestedRange = range?.match(/^bytes=(\d*)-(\d*)$/);
   const start = requestedRange?.[1] ? Number(requestedRange[1]) : 0;
@@ -42,16 +46,20 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   const { id } = await params;
   if (!ObjectId.isValid(id)) return NextResponse.json({ error: "Invalid song id" }, { status: 400 });
 
-  const database = await getDatabase();
-  const bucket = await getAudioBucket();
-  if (!database || !bucket) return NextResponse.json({ error: "MongoDB is not configured" }, { status: 503 });
+  const stores = await getStorageTargets();
+  if (!stores.length) return NextResponse.json({ error: "MongoDB is not configured" }, { status: 503 });
 
-  const song = await database.collection("songs").findOne({ _id: new ObjectId(id) });
+  let matchedStore = stores[0];
+  let song = null;
+  for (const store of stores) {
+    song = await store.database.collection("songs").findOne({ _id: new ObjectId(id) });
+    if (song) { matchedStore = store; break; }
+  }
   if (!song) return NextResponse.json({ error: "Song not found" }, { status: 404 });
 
   if (song.audioId instanceof ObjectId) {
-    await bucket.delete(song.audioId);
+    await matchedStore.bucket.delete(song.audioId);
   }
-  await database.collection("songs").deleteOne({ _id: song._id });
+  await matchedStore.database.collection("songs").deleteOne({ _id: song._id });
   return NextResponse.json({ deleted: true });
 }
