@@ -15,6 +15,16 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "Challenging Youth | Vinayaka Chavithi DJ Songs",
   description: "A festive home for the Challenging Youth DJ song collection.",
+  manifest: "/manifest.webmanifest",
+  icons: [
+    { rel: "icon", url: "/logo.jpeg", type: "image/jpeg" },
+    { rel: "apple-touch-icon", url: "/logo.jpeg", type: "image/jpeg" },
+  ],
+  appleWebApp: {
+    capable: true,
+    title: "Challenging Youth",
+    statusBarStyle: "default",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
