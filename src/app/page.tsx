@@ -78,18 +78,27 @@ export default function Home() {
   const folders = useMemo(() => [likedFolder, ...new Set([...defaultFolders, ...songs.map((song) => song.category).filter(Boolean)])], [songs]);
 
   const folderCounts = useMemo(() => folders.reduce<Record<string, number>>((counts, folder) => {
-    counts[folder] = folder === likedFolder
+    const total = folder === likedFolder
       ? songs.filter((song) => likedSongIds.includes(song.id)).length
       : songs.filter((song) => song.category === folder).length;
+    counts[folder] = folder === "Love Failure" ? Math.min(total, 3) : total;
     return counts;
   }, {}), [folders, likedSongIds, songs]);
 
-  const filteredSongs = useMemo(() => songs.filter((song) => {
-    const matchesCategory = category === "All mixes"
-      || (category === likedFolder ? likedSongIds.includes(song.id) : song.category === category);
-    const matchesQuery = `${song.title} ${song.artist}`.toLowerCase().includes(query.toLowerCase());
-    return matchesCategory && matchesQuery;
-  }), [songs, category, likedSongIds, query]);
+  const filteredSongs = useMemo(() => {
+    const baseSongs = songs.filter((song) => {
+      const matchesCategory = category === "All mixes"
+        || (category === likedFolder ? likedSongIds.includes(song.id) : song.category === category);
+      const matchesQuery = `${song.title} ${song.artist}`.toLowerCase().includes(query.toLowerCase());
+      return matchesCategory && matchesQuery;
+    });
+
+    if (category === "Love Failure") {
+      return baseSongs.slice(0, 3);
+    }
+
+    return baseSongs;
+  }, [songs, category, likedSongIds, query]);
 
   function chooseSong(song: Song) {
     setActiveSong(song);
