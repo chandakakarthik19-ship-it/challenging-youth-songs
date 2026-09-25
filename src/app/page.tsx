@@ -72,6 +72,25 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!songs.length) return;
+    const initialSong = songs[0];
+    setActiveSong((current) => current ?? initialSong);
+    if (audioRef.current && initialSong.fileUrl) {
+      audioRef.current.src = initialSong.fileUrl;
+      audioRef.current.preload = "auto";
+      audioRef.current.load();
+    }
+
+    const prefetchCount = Math.min(songs.length, 6);
+    songs.slice(0, prefetchCount).forEach((song) => {
+      if (!song.fileUrl) return;
+      const audio = new Audio(song.fileUrl);
+      audio.preload = "auto";
+      audio.load();
+    });
+  }, [songs]);
+
+  useEffect(() => {
     window.localStorage.setItem("challenging-youth-liked-songs", JSON.stringify(likedSongIds));
   }, [likedSongIds]);
 
@@ -107,6 +126,8 @@ export default function Home() {
     setDuration(0);
     if (song.fileUrl && audioRef.current) {
       audioRef.current.src = song.fileUrl;
+      audioRef.current.preload = "auto";
+      audioRef.current.load();
       void audioRef.current.play();
     }
   }
@@ -222,7 +243,7 @@ export default function Home() {
       <section id="about" className="mx-auto mt-24 grid max-w-7xl gap-8 border-t border-[#e6e1d7] px-6 pt-10 md:grid-cols-[1fr_auto] lg:px-10"><div><p className="display-font text-2xl font-bold">Made for the whole pandal.</p><p className="mt-2 max-w-xl leading-7 text-[#68736c]">Keep every procession anthem, family favorite, and midnight bass edit in one place. Add songs one file at a time and let the archive grow.</p></div><div className="flex items-start gap-3 text-sm font-semibold text-[#68736c]"><Headphones size={19} className="text-[#e66f2e]" /> Built for big speakers and small screens.</div></section>
 
       <div className="fixed bottom-8 right-8 z-10 flex items-center gap-3"><button aria-label="Play previous song" title="Previous song" onClick={playPreviousSong} disabled={!activeSong || !filteredSongs.length} className="grid h-11 w-11 place-items-center rounded-full bg-[#17221c] text-white shadow-xl transition hover:scale-105 hover:bg-[#2f6849] disabled:cursor-not-allowed disabled:opacity-40"><SkipBack size={17} fill="currentColor" /></button><button aria-label="Play next song" title="Next song" onClick={playNextSong} disabled={!activeSong || !filteredSongs.length} className="grid h-11 w-11 place-items-center rounded-full bg-[#17221c] text-white shadow-xl transition hover:scale-105 hover:bg-[#2f6849] disabled:cursor-not-allowed disabled:opacity-40"><SkipForward size={17} fill="currentColor" /></button></div>
-      <audio ref={audioRef} preload="metadata" onLoadedMetadata={() => setDuration(audioRef.current?.duration ?? 0)} onDurationChange={() => setDuration(audioRef.current?.duration ?? 0)} onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)} onEnded={playNextSong} />
+      <audio ref={audioRef} preload="auto" onLoadedMetadata={() => setDuration(audioRef.current?.duration ?? 0)} onDurationChange={() => setDuration(audioRef.current?.duration ?? 0)} onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)} onEnded={playNextSong} />
       {showUpload && <div className="fixed inset-0 z-20 grid place-items-center bg-[#17221c]/45 p-5" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-[1.75rem] bg-[#fffdf8] p-7 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[#e66f2e]">Library admin</p><h2 className="display-font mt-2 text-3xl font-bold">Add songs.</h2></div><button onClick={() => setShowUpload(false)} aria-label="Close upload dialog" className="rounded-full p-2 text-[#68736c] hover:bg-[#ece9e0]"><X size={20} /></button></div><p className="mt-4 text-sm leading-6 text-[#68736c]">Choose an audio file or ZIP archive, then select the folder where it should appear.</p><label className="mt-5 block text-sm font-bold text-[#17221c]">Save in folder<select value={selectedFolder} onChange={(event) => setSelectedFolder(event.target.value)} className="mt-2 w-full rounded-xl border border-[#d9d4c9] bg-white px-3 py-3 font-normal outline-none focus:border-[#e66f2e]">{folders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}</select></label><label className="mt-4 block text-sm font-bold text-[#17221c]">Or create a new folder<input value={newFolder} onChange={(event) => setNewFolder(event.target.value)} placeholder="Folder name" className="mt-2 w-full rounded-xl border border-[#d9d4c9] bg-white px-3 py-3 font-normal outline-none placeholder:text-[#9ba39e] focus:border-[#e66f2e]" /></label><label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#d9d4c9] p-8 text-center transition hover:border-[#e66f2e] hover:bg-[#fff8ee]"><Upload size={26} className="text-[#e66f2e]" /><span className="mt-3 font-bold">Choose audio or ZIP</span><span className="mt-1 text-xs text-[#9ba39e]">MP3, WAV, M4A, OGG, AAC, or ZIP</span><input type="file" accept="audio/mpeg,audio/wav,audio/mp4,audio/ogg,audio/aac,.mp3,.wav,.m4a,.ogg,.aac,.zip,application/zip" onChange={uploadSong} className="hidden" /></label><div className="mt-5 flex items-center gap-2 text-sm text-[#68736c]">{uploadState.includes("...") && <LoaderCircle size={16} className="animate-spin text-[#e66f2e]" />}{uploadState}</div></div></div>}
     </main>
   );
