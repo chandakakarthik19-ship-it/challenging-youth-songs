@@ -34,9 +34,22 @@ export default function Home() {
   const [offlineStatus, setOfflineStatus] = useState("");
   const [isDownloading, setIsDownloading] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const hasRegisteredServiceWorker = useRef(false);
+  const hasLoadedLocalCatalog = useRef(false);
 
   useEffect(() => {
-    if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
+    if (hasRegisteredServiceWorker.current) return;
+    hasRegisteredServiceWorker.current = true;
+
+    if ("serviceWorker" in navigator) {
+      void navigator.serviceWorker.register("/sw.js");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (hasLoadedLocalCatalog.current) return;
+    hasLoadedLocalCatalog.current = true;
+
     fetch("/songs.json")
       .then((response) => response.ok ? response.json() as Promise<Song[]> : Promise.reject(new Error("Catalog unavailable")))
       .then((localSongs) => {
