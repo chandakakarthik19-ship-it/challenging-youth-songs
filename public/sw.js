@@ -42,6 +42,11 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data?.type !== "CACHE_LIBRARY" || !Array.isArray(event.data.urls)) return;
+  event.waitUntil(cacheLibrary(event.data.urls, event.source?.id));
+});
+
 async function handleNavigationRequest(request) {
   try {
     const networkResponse = await fetch(request);
@@ -82,6 +87,29 @@ async function cachedAudio(request) {
     const offlineAudio = await cache.match(request.url);
     if (!offlineAudio) return Response.error();
     return request.headers.has("range") ? rangedResponse(offlineAudio, request.headers.get("range")) : offlineAudio;
+  }
+}
+
+async function cacheLibrary(urls, clientId) {
+  const cache = await caches.open(AUDIO_CACHE);
+  const client = clientId ? await self.clients.get(clientId) : null;
+  const audioUrls = [...new Set(urls.filter((url) => typeof url === "string" && url.startsWith("/audio/")))];
+  let completed = 0;
+  const report = (type, message) => client?.postMessage({ type, completed, total: audioUrls.length, message });
+
+  try {
+    for (const url of audioUrls) {
+      if (!(await cache.match(url))) {
+        const response = await fetch(url);
+        if (!response.ok || response.status !== 200) throw new Error(`Could not download ${url}.`);
+        await cache.put(url, response);
+      }
+      completed += 1;
+      report("LIBRARY_CACHE_PROGRESS");
+    }
+    report("LIBRARY_CACHE_COMPLETE");
+  } catch (error) {
+    report("LIBRARY_CACHE_ERROR", error instanceof Error ? error.message : "Offline download failed.");
   }
 }
 

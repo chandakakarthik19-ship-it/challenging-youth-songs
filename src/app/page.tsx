@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Disc3, FolderOpen, Headphones, Heart, LoaderCircle, Pause, Play, Search, SkipBack, SkipForward, Trash2, Upload, Volume2, X } from "lucide-react";
+import { Disc3, Download, FolderOpen, Headphones, Heart, LoaderCircle, Pause, Play, Search, SkipBack, SkipForward, Trash2, Upload, Volume2, X } from "lucide-react";
 
 type Song = { id: string; title: string; artist: string; category: string; duration: string; fileUrl?: string };
 
@@ -31,6 +31,8 @@ export default function Home() {
   const [newFolder, setNewFolder] = useState("");
   const [uploadState, setUploadState] = useState("Ready for an audio file.");
   const [cacheState, setCacheState] = useState("Loading local song catalog...");
+  const [offlineStatus, setOfflineStatus] = useState("");
+  const [isDownloading, setIsDownloading] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
@@ -48,6 +50,24 @@ export default function Home() {
   useEffect(() => {
     window.localStorage.setItem("challenging-youth-liked-songs", JSON.stringify(likedSongIds));
   }, [likedSongIds]);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    function handleCacheMessage(event: MessageEvent<{ type?: string; completed?: number; total?: number; message?: string }>) {
+      const { type, completed = 0, total = songs.length, message } = event.data;
+      if (type === "LIBRARY_CACHE_PROGRESS") {
+        setOfflineStatus(`Saving ${completed} of ${total} songs for offline play...`);
+      } else if (type === "LIBRARY_CACHE_COMPLETE") {
+        setOfflineStatus(`All ${total} songs are saved for offline play.`);
+        setIsDownloading(false);
+      } else if (type === "LIBRARY_CACHE_ERROR") {
+        setOfflineStatus(`Saved ${completed} of ${total}. ${message ?? "Download stopped."}`);
+        setIsDownloading(false);
+      }
+    }
+    navigator.serviceWorker.addEventListener("message", handleCacheMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", handleCacheMessage);
+  }, [songs.length]);
 
   const folders = useMemo(() => [likedFolder, ...new Set([...defaultFolders, ...songs.map((song) => song.category).filter(Boolean)])], [songs]);
 
@@ -123,6 +143,28 @@ export default function Home() {
       : [...current, activeSong.id]);
   }
 
+  async function downloadSongsForOffline() {
+    if (!songs.length || isDownloading) return;
+    if (!("serviceWorker" in navigator)) {
+      setOfflineStatus("Offline downloads are not supported in this browser.");
+      return;
+    }
+
+    setIsDownloading(true);
+    setOfflineStatus("Preparing offline download...");
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      if (!registration.active) throw new Error("Offline storage is not ready. Refresh and try again.");
+      registration.active.postMessage({
+        type: "CACHE_LIBRARY",
+        urls: songs.map((song) => song.fileUrl).filter((url): url is string => Boolean(url)),
+      });
+    } catch (error) {
+      setIsDownloading(false);
+      setOfflineStatus(error instanceof Error ? error.message : "Could not start offline download.");
+    }
+  }
+
   async function uploadSong(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -190,7 +232,7 @@ export default function Home() {
             return <button key={item} onClick={() => setCategory(item)} aria-pressed={isActive} className={`group flex min-h-24 items-center justify-between rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${isActive ? "border-[#e66f2e] bg-[#fff0e8] text-[#17221c] shadow-lg shadow-[#e4d7ba]/35" : "border-[#e6e1d7] bg-[#fffdf8]/75 text-[#68736c] hover:border-[#f5bd6d] hover:bg-[#fff8ee]"}`}><span className="flex items-center gap-3"><span className={`grid h-10 w-10 place-items-center rounded-xl ${isActive ? "bg-[#e66f2e] text-white" : "bg-[#ece9e0] text-[#68736c]"}`}><FolderOpen size={19} /></span><span><span className="block font-bold">{item}</span><span className={`mt-1 block text-xs ${isActive ? "text-[#c84c22]" : "text-[#9ba39e]"}`}>{count} {count === 1 ? "song" : "songs"}</span></span></span>{isActive && <span className="rounded-full bg-[#17221c] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white">Open</span>}</button>;
           })}
         </div>
-        <div className="mb-6 flex items-center justify-between gap-4"><p className="text-sm font-semibold text-[#68736c]">{category === "All mixes" ? "All songs" : `${category} folder`}</p><span className="text-xs font-semibold text-[#9ba39e]">{cacheState}</span></div>
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm font-semibold text-[#68736c]">{category === "All mixes" ? "All songs" : `${category} folder`}</p><div className="flex flex-wrap items-center gap-3"><span role="status" aria-live="polite" className="text-xs font-semibold text-[#68736c]">{offlineStatus || cacheState}</span><button type="button" onClick={() => void downloadSongsForOffline()} disabled={!songs.length || isDownloading} title="Download all songs for offline playback (about 671 MB)" className="flex items-center gap-2 rounded-full border border-[#d9d4c9] bg-[#fffdf8] px-4 py-2 text-xs font-bold text-[#17221c] transition hover:border-[#2f6849] hover:text-[#2f6849] disabled:cursor-not-allowed disabled:opacity-50">{isDownloading ? <LoaderCircle size={15} className="animate-spin" /> : <Download size={15} />}{isDownloading ? "Downloading..." : "Download all (671 MB)"}</button></div></div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{filteredSongs.map((song, index) => <article key={song.id} onClick={() => chooseSong(song)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") chooseSong(song); }} role="button" tabIndex={0} className="group flex cursor-pointer items-center gap-4 rounded-2xl border border-[#e6e1d7] bg-[#fffdf8]/75 p-4 transition hover:-translate-y-1 hover:border-[#f5bd6d] hover:shadow-xl hover:shadow-[#e4d7ba]/40"><button onClick={() => chooseSong(song)} aria-label={`Play ${song.title}`} className={`grid h-14 w-14 shrink-0 place-items-center rounded-xl text-white ${index % 3 === 0 ? "bg-[#e66f2e]" : index % 3 === 1 ? "bg-[#2f6849]" : "bg-[#17221c]"}`}>{activeSong?.id === song.id && isPlaying ? <Pause size={19} fill="currentColor" /> : <Play size={19} fill="currentColor" />}</button><div className="min-w-0 flex-1"><p className="truncate font-bold text-[#17221c]">{song.title}</p><p className="mt-1 truncate text-sm text-[#68736c]">{song.artist}</p></div><span className="text-xs font-semibold text-[#9ba39e]">{song.duration}</span>{song.id.match(/^[a-f\d]{24}$/i) && <button onClick={(event) => { event.stopPropagation(); void deleteSong(song); }} aria-label={`Delete ${song.title}`} title="Delete song" className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[#9ba39e] transition hover:bg-[#fff0e8] hover:text-[#c84c22]"><Trash2 size={16} /></button>}</article>)}</div>
         {!filteredSongs.length && <div className="rounded-2xl border border-dashed border-[#d9d4c9] p-12 text-center text-[#68736c]">No mixes match that search yet.</div>}
       </section>
