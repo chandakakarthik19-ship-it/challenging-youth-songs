@@ -6,28 +6,12 @@ import { Disc3, FolderOpen, Headphones, Heart, LoaderCircle, Pause, Play, Search
 
 type Song = { id: string; title: string; artist: string; category: string; duration: string; fileUrl?: string };
 
-const demoSongs: Song[] = [
-  { id: "demo-1", title: "Vinayaka Dj Sharanam", artist: "Nadam Originals", category: "Devotional", duration: "06:24" },
-  { id: "demo-2", title: "Ganapathi Bappa Bass Mix", artist: "DJ Sree", category: "Bass Boost", duration: "04:48" },
-  { id: "demo-3", title: "Vighnaharta Street Edit", artist: "Nadam Originals", category: "Procession", duration: "05:16" },
-  { id: "demo-5", title: "Lalbagh Cha Raja Dhol", artist: "Beat Mandali", category: "Procession", duration: "03:55" },
-  { id: "demo-6", title: "Pandal Lights Afterdark", artist: "DJ Sree", category: "Bass Boost", duration: "05:32" },
-];
-
 const defaultFolders = ["Devotional", "Bass Boost", "Procession", "Love Failure", "Youth", "Pavankalyan"];
 const likedFolder = "Liked songs";
 
 export default function Home() {
-  const [songs, setSongs] = useState<Song[]>(() => {
-    if (typeof window === "undefined") return demoSongs;
-    try {
-      const savedSongs = window.localStorage.getItem("challenging-youth-songs");
-      return savedSongs ? JSON.parse(savedSongs) as Song[] : demoSongs;
-    } catch {
-      return demoSongs;
-    }
-  });
-  const [activeSong, setActiveSong] = useState<Song | null>(demoSongs[0]);
+  const [songs, setSongs] = useState<Song[]>([]);
+  const [activeSong, setActiveSong] = useState<Song | null>(null);
   const [category, setCategory] = useState("All mixes");
   const [query, setQuery] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
@@ -46,49 +30,20 @@ export default function Home() {
   const [selectedFolder, setSelectedFolder] = useState(defaultFolders[0]);
   const [newFolder, setNewFolder] = useState("");
   const [uploadState, setUploadState] = useState("Ready for an audio file.");
-  const [cacheState, setCacheState] = useState("Preparing your library...");
+  const [cacheState, setCacheState] = useState("Loading local song catalog...");
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
-    fetch("/songs.json").then((response) => response.ok ? response.json() : []).then((localSongs) => {
-      if (localSongs.length) {
+    fetch("/songs.json")
+      .then((response) => response.ok ? response.json() as Promise<Song[]> : Promise.reject(new Error("Catalog unavailable")))
+      .then((localSongs) => {
         setSongs(localSongs);
-        window.localStorage.setItem("challenging-youth-songs", JSON.stringify(localSongs));
-      }
-    }).catch(() => undefined);
-    fetch("/api/songs").then((response) => response.json()).then((data) => {
-      if (data.songs?.length) {
-        setSongs(data.songs);
-        window.localStorage.setItem("challenging-youth-songs", JSON.stringify(data.songs));
-        if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.ready.then((registration) => {
-            registration.active?.postMessage({ type: "CACHE_SONGS", urls: data.songs.map((song: Song) => song.fileUrl).filter(Boolean), priorityUrl: data.songs[0]?.fileUrl });
-            setCacheState(`${data.songs.length} songs are being prepared for quick playback.`);
-          }).catch(() => setCacheState("Songs will stream from the internet."));
-        }
-      }
-    }).catch(() => setCacheState("Ready to play from the saved library."));
+        setActiveSong((current) => current ?? localSongs[0] ?? null);
+        setCacheState("Audio loads when you press play.");
+      })
+      .catch(() => setCacheState("Could not load the local song catalog."));
   }, []);
-
-  useEffect(() => {
-    if (!songs.length) return;
-    const initialSong = songs[0];
-    setActiveSong((current) => current ?? initialSong);
-    if (audioRef.current && initialSong.fileUrl) {
-      audioRef.current.src = initialSong.fileUrl;
-      audioRef.current.preload = "auto";
-      audioRef.current.load();
-    }
-
-    const prefetchCount = Math.min(songs.length, 6);
-    songs.slice(0, prefetchCount).forEach((song) => {
-      if (!song.fileUrl) return;
-      const audio = new Audio(song.fileUrl);
-      audio.preload = "auto";
-      audio.load();
-    });
-  }, [songs]);
 
   useEffect(() => {
     window.localStorage.setItem("challenging-youth-liked-songs", JSON.stringify(likedSongIds));
@@ -100,7 +55,7 @@ export default function Home() {
     const total = folder === likedFolder
       ? songs.filter((song) => likedSongIds.includes(song.id)).length
       : songs.filter((song) => song.category === folder).length;
-    counts[folder] = folder === "Love Failure" ? Math.min(total, 3) : total;
+    counts[folder] = total;
     return counts;
   }, {}), [folders, likedSongIds, songs]);
 
@@ -112,10 +67,6 @@ export default function Home() {
       return matchesCategory && matchesQuery;
     });
 
-    if (category === "Love Failure") {
-      return baseSongs.slice(0, 3);
-    }
-
     return baseSongs;
   }, [songs, category, likedSongIds, query]);
 
@@ -126,8 +77,6 @@ export default function Home() {
     setDuration(0);
     if (song.fileUrl && audioRef.current) {
       audioRef.current.src = song.fileUrl;
-      audioRef.current.preload = "auto";
-      audioRef.current.load();
       void audioRef.current.play();
     }
   }
@@ -188,7 +137,13 @@ export default function Home() {
       setUploadState(`${result.uploaded} song${result.uploaded === 1 ? "" : "s"} added. Refreshing your library...`);
       const songsResponse = await fetch("/api/songs");
       const songsData = await songsResponse.json();
-      if (songsData.songs?.length) setSongs(songsData.songs);
+      if (songsData.songs?.length) {
+        setSongs((current) => {
+          const mergedSongs = new Map(current.map((song) => [song.id, song] as const));
+          for (const song of songsData.songs as Song[]) mergedSongs.set(song.id, song);
+          return [...mergedSongs.values()];
+        });
+      }
       setNewFolder("");
       setShowUpload(false);
     } catch (error) {
@@ -243,7 +198,7 @@ export default function Home() {
       <section id="about" className="mx-auto mt-24 grid max-w-7xl gap-8 border-t border-[#e6e1d7] px-6 pt-10 md:grid-cols-[1fr_auto] lg:px-10"><div><p className="display-font text-2xl font-bold">Made for the whole pandal.</p><p className="mt-2 max-w-xl leading-7 text-[#68736c]">Keep every procession anthem, family favorite, and midnight bass edit in one place. Add songs one file at a time and let the archive grow.</p></div><div className="flex items-start gap-3 text-sm font-semibold text-[#68736c]"><Headphones size={19} className="text-[#e66f2e]" /> Built for big speakers and small screens.</div></section>
 
       <div className="fixed bottom-8 right-8 z-10 flex items-center gap-3"><button aria-label="Play previous song" title="Previous song" onClick={playPreviousSong} disabled={!activeSong || !filteredSongs.length} className="grid h-11 w-11 place-items-center rounded-full bg-[#17221c] text-white shadow-xl transition hover:scale-105 hover:bg-[#2f6849] disabled:cursor-not-allowed disabled:opacity-40"><SkipBack size={17} fill="currentColor" /></button><button aria-label="Play next song" title="Next song" onClick={playNextSong} disabled={!activeSong || !filteredSongs.length} className="grid h-11 w-11 place-items-center rounded-full bg-[#17221c] text-white shadow-xl transition hover:scale-105 hover:bg-[#2f6849] disabled:cursor-not-allowed disabled:opacity-40"><SkipForward size={17} fill="currentColor" /></button></div>
-      <audio ref={audioRef} preload="auto" onLoadedMetadata={() => setDuration(audioRef.current?.duration ?? 0)} onDurationChange={() => setDuration(audioRef.current?.duration ?? 0)} onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)} onEnded={playNextSong} />
+      <audio ref={audioRef} preload="none" onLoadedMetadata={() => setDuration(audioRef.current?.duration ?? 0)} onDurationChange={() => setDuration(audioRef.current?.duration ?? 0)} onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)} onEnded={playNextSong} />
       {showUpload && <div className="fixed inset-0 z-20 grid place-items-center bg-[#17221c]/45 p-5" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-[1.75rem] bg-[#fffdf8] p-7 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-[#e66f2e]">Library admin</p><h2 className="display-font mt-2 text-3xl font-bold">Add songs.</h2></div><button onClick={() => setShowUpload(false)} aria-label="Close upload dialog" className="rounded-full p-2 text-[#68736c] hover:bg-[#ece9e0]"><X size={20} /></button></div><p className="mt-4 text-sm leading-6 text-[#68736c]">Choose an audio file or ZIP archive, then select the folder where it should appear.</p><label className="mt-5 block text-sm font-bold text-[#17221c]">Save in folder<select value={selectedFolder} onChange={(event) => setSelectedFolder(event.target.value)} className="mt-2 w-full rounded-xl border border-[#d9d4c9] bg-white px-3 py-3 font-normal outline-none focus:border-[#e66f2e]">{folders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}</select></label><label className="mt-4 block text-sm font-bold text-[#17221c]">Or create a new folder<input value={newFolder} onChange={(event) => setNewFolder(event.target.value)} placeholder="Folder name" className="mt-2 w-full rounded-xl border border-[#d9d4c9] bg-white px-3 py-3 font-normal outline-none placeholder:text-[#9ba39e] focus:border-[#e66f2e]" /></label><label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#d9d4c9] p-8 text-center transition hover:border-[#e66f2e] hover:bg-[#fff8ee]"><Upload size={26} className="text-[#e66f2e]" /><span className="mt-3 font-bold">Choose audio or ZIP</span><span className="mt-1 text-xs text-[#9ba39e]">MP3, WAV, M4A, OGG, AAC, or ZIP</span><input type="file" accept="audio/mpeg,audio/wav,audio/mp4,audio/ogg,audio/aac,.mp3,.wav,.m4a,.ogg,.aac,.zip,application/zip" onChange={uploadSong} className="hidden" /></label><div className="mt-5 flex items-center gap-2 text-sm text-[#68736c]">{uploadState.includes("...") && <LoaderCircle size={16} className="animate-spin text-[#e66f2e]" />}{uploadState}</div></div></div>}
     </main>
   );

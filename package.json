@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "import:local": "node scripts/import-local.mjs",
+    "import:folders": "node scripts/import-song-folders.mjs",
     "import:rar": "node scripts/import-rar.mjs",
     "extract:rar": "node scripts/extract-rar-local.mjs"
   },

@@ -1,5 +1,5 @@
-const APP_CACHE = "challenging-youth-app-v1";
-const AUDIO_CACHE = "challenging-youth-audio-v1";
+const APP_CACHE = "challenging-youth-app-v2";
+const AUDIO_CACHE = "challenging-youth-audio-v2";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/logo.jpeg", "/songs.json"];
 
 self.addEventListener("install", (event) => {
@@ -27,7 +27,7 @@ self.addEventListener("fetch", (event) => {
   const requestUrl = new URL(request.url);
   if (requestUrl.origin !== self.location.origin) return;
 
-  if (requestUrl.pathname.startsWith("/api/songs/") && request.mode === "cors") {
+  if ((requestUrl.pathname.startsWith("/api/songs/") && request.mode === "cors") || requestUrl.pathname.startsWith("/audio/")) {
     event.respondWith(cachedAudio(request));
     return;
   }
@@ -40,11 +40,6 @@ self.addEventListener("fetch", (event) => {
   if (requestUrl.pathname === "/" || /\.(?:js|css|png|jpg|jpeg|svg|gif|webp|ico|json|woff2?|ttf|map)$/i.test(requestUrl.pathname)) {
     event.respondWith(cacheFirst(request));
   }
-});
-
-self.addEventListener("message", (event) => {
-  if (event.data?.type !== "CACHE_SONGS" || !Array.isArray(event.data.urls)) return;
-  event.waitUntil(cacheSongs(event.data.urls, event.data.priorityUrl));
 });
 
 async function handleNavigationRequest(request) {
@@ -77,29 +72,33 @@ async function cacheFirst(request) {
 async function cachedAudio(request) {
   const cache = await caches.open(AUDIO_CACHE);
   const cached = await cache.match(request.url);
-  if (cached) return cached;
+  if (cached) return request.headers.has("range") ? rangedResponse(cached, request.headers.get("range")) : cached;
 
   try {
     const response = await fetch(request);
     if (response.ok && response.status === 200) await cache.put(request, response.clone());
     return response;
   } catch {
-    return caches.match(request.url) || Response.error();
+    const offlineAudio = await cache.match(request.url);
+    if (!offlineAudio) return Response.error();
+    return request.headers.has("range") ? rangedResponse(offlineAudio, request.headers.get("range")) : offlineAudio;
   }
 }
 
-async function cacheSongs(urls, priorityUrl) {
-  const cache = await caches.open(AUDIO_CACHE);
-  const orderedUrls = priorityUrl ? [priorityUrl, ...urls.filter((url) => url !== priorityUrl)] : urls;
-  for (let index = 0; index < orderedUrls.length; index += 4) {
-    await Promise.all(orderedUrls.slice(index, index + 4).map(async (url) => {
-      if (!url || await cache.match(url)) return;
-      try {
-        const response = await fetch(url);
-        if (response.ok && response.status === 200) await cache.put(url, response);
-      } catch {
-        // Keep preparing the remaining songs when one download fails.
-      }
-    }));
+async function rangedResponse(response, rangeHeader) {
+  const match = /^bytes=(\d+)-(\d*)$/.exec(rangeHeader ?? "");
+  if (!match) return response;
+
+  const body = await response.arrayBuffer();
+  const start = Number(match[1]);
+  const end = Math.min(match[2] ? Number(match[2]) : body.byteLength - 1, body.byteLength - 1);
+  if (start >= body.byteLength || end < start) {
+    return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${body.byteLength}` } });
   }
+
+  const headers = new Headers(response.headers);
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Content-Range", `bytes ${start}-${end}/${body.byteLength}`);
+  headers.set("Content-Length", String(end - start + 1));
+  return new Response(body.slice(start, end + 1), { status: 206, headers });
 }
